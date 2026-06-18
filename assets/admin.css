@@ -1,0 +1,72 @@
+/* Lanka Hospitals Multisite Activity Log — admin styles */
+
+.lh-al-filters {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	margin: 12px 0;
+}
+
+.lh-al-filters select,
+.lh-al-filters input[type="date"] {
+	min-height: 30px;
+}
+
+.lh-al-wrap .lh-al-time,
+.lh-al-wrap .lh-al-role,
+.lh-al-wrap .lh-al-object {
+	color: #646970;
+	font-size: 12px;
+}
+
+.lh-al-wrap .lh-al-object {
+	font-style: italic;
+}
+
+.lh-al-event {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 3px;
+	font-size: 12px;
+	font-weight: 600;
+	background: #f0f0f1;
+	color: #2c3338;
+	border-left: 3px solid #c3c4c7;
+}
+
+.lh-al-sev-info {
+	border-left-color: #72aee6;
+}
+
+.lh-al-sev-notice {
+	border-left-color: #dba617;
+	background: #fcf9e8;
+}
+
+.lh-al-sev-warning {
+	border-left-color: #d63638;
+	background: #fcf0f1;
+	color: #8a1f1f;
+}
+
+.lh-al-clear-form {
+	margin-top: 16px;
+}
+
+.column-created_at {
+	width: 130px;
+}
+
+.column-event_type {
+	width: 160px;
+}
+
+.column-ip_address {
+	width: 130px;
+}
+
+.column-blog_id,
+.column-user_login {
+	width: 160px;
+}
