@@ -186,6 +186,92 @@ class LH_AL_Admin {
 			}
 			$this->redirect_with_notice( 'lh-activity-log-settings', 'purged' );
 		}
+
+		// Export (CSV / Excel).
+		if ( isset( $_GET['action'] ) && 'export' === $_GET['action'] ) {
+			check_admin_referer( 'lh_al_export' );
+			$this->export_csv();
+		}
+	}
+
+	/**
+	 * Stream the (filtered) log as a UTF-8 CSV that opens directly in Excel.
+	 */
+	private function export_csv() {
+		$args = array(
+			'blog_id'    => $this->get_req( 'blog_id' ),
+			'user_id'    => $this->get_req( 'user_id' ),
+			'event_type' => $this->get_req( 'event_type' ),
+			'severity'   => $this->get_req( 'severity' ),
+			'search'     => $this->get_req( 's' ),
+			'date_from'  => $this->get_req( 'date_from' ),
+			'date_to'    => $this->get_req( 'date_to' ),
+			'orderby'    => 'created_at',
+			'order'      => 'DESC',
+		);
+
+		$filename = 'activity-log-' . gmdate( 'Y-m-d-His' ) . '.csv';
+
+		nocache_headers();
+		header( 'Content-Type: text/csv; charset=utf-8' );
+		header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
+
+		// Discard any buffered output so the download is not corrupted.
+		while ( ob_get_level() ) {
+			ob_end_clean();
+		}
+
+		$out = fopen( 'php://output', 'w' );
+
+		// UTF-8 BOM so Excel detects encoding correctly.
+		fwrite( $out, "\xEF\xBB\xBF" ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+
+		$multisite = is_multisite();
+
+		$header = array( 'ID', 'Date' );
+		if ( $multisite ) {
+			$header[] = 'Site ID';
+			$header[] = 'Site';
+		}
+		$header = array_merge(
+			$header,
+			array( 'User', 'Role', 'IP Address', 'Event', 'Severity', 'Object Type', 'Object ID', 'Object Name', 'Description', 'Meta' )
+		);
+		fputcsv( $out, $header );
+
+		$blog_names = array();
+
+		foreach ( LH_AL_DB::instance()->stream_for_export( $args ) as $rows ) {
+			foreach ( $rows as $row ) {
+				$line = array( $row->id, $row->created_at );
+
+				if ( $multisite ) {
+					$bid = (int) $row->blog_id;
+					if ( ! isset( $blog_names[ $bid ] ) ) {
+						$details            = get_blog_details( $bid );
+						$blog_names[ $bid ] = $details ? $details->blogname : ( 'Site #' . $bid );
+					}
+					$line[] = $bid;
+					$line[] = $blog_names[ $bid ];
+				}
+
+				$line[] = $row->user_login;
+				$line[] = $row->user_role;
+				$line[] = $row->ip_address;
+				$line[] = $row->event_type;
+				$line[] = $row->severity;
+				$line[] = $row->object_type;
+				$line[] = $row->object_id;
+				$line[] = $row->object_name;
+				$line[] = $row->message;
+				$line[] = $row->meta;
+
+				fputcsv( $out, $line );
+			}
+		}
+
+		fclose( $out ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		exit;
 	}
 
 	/**
@@ -293,6 +379,7 @@ class LH_AL_Admin {
 
 					<?php submit_button( __( 'Filter', 'lh-activity-log' ), 'secondary', '', false ); ?>
 					<a href="<?php echo esc_url( add_query_arg( 'page', 'lh-activity-log', $this->base_url() ) ); ?>" class="button"><?php esc_html_e( 'Reset', 'lh-activity-log' ); ?></a>
+					<a href="<?php echo esc_url( $this->export_url() ); ?>" class="button button-primary"><span class="dashicons dashicons-media-spreadsheet" style="margin:4px 4px 0 0;"></span><?php esc_html_e( 'Export to Excel', 'lh-activity-log' ); ?></a>
 				</div>
 
 				<?php $table->search_box( __( 'Search log', 'lh-activity-log' ), 'lh-al-search' ); ?>
@@ -376,5 +463,26 @@ class LH_AL_Admin {
 	private function get_req( $key ) {
 		// phpcs:ignore WordPress.Security.NonceVerification
 		return isset( $_GET[ $key ] ) ? sanitize_text_field( wp_unslash( $_GET[ $key ] ) ) : '';
+	}
+
+	/**
+	 * Build the nonced export URL carrying the active filters.
+	 *
+	 * @return string
+	 */
+	private function export_url() {
+		$args = array(
+			'page'   => 'lh-activity-log',
+			'action' => 'export',
+		);
+
+		foreach ( array( 'blog_id', 'event_type', 'severity', 's', 'date_from', 'date_to' ) as $key ) {
+			$value = $this->get_req( $key );
+			if ( '' !== $value ) {
+				$args[ $key ] = $value;
+			}
+		}
+
+		return wp_nonce_url( add_query_arg( $args, $this->base_url() ), 'lh_al_export' );
 	}
 }

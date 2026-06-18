@@ -39,6 +39,7 @@ It also works on a standard single-site install.
 
 * Single shared log table — one place to see activity across all network sites
 * Filter by site, event type, severity, date range, and free-text search
+* One-click "Export to Excel" (UTF-8 CSV) of the filtered results
 * Sortable, paginated table using the native WordPress admin UI
 * Records user, role, and IP address for each event
 * Configurable retention period with automatic daily purge

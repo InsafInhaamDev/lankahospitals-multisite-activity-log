@@ -179,47 +179,8 @@ class LH_AL_DB {
 		$args  = wp_parse_args( $args, $defaults );
 		$table = self::table_name();
 
-		$where  = array( '1=1' );
-		$params = array();
-
-		if ( '' !== $args['blog_id'] && null !== $args['blog_id'] ) {
-			$where[]  = 'blog_id = %d';
-			$params[] = (int) $args['blog_id'];
-		}
-		if ( '' !== $args['user_id'] ) {
-			$where[]  = 'user_id = %d';
-			$params[] = (int) $args['user_id'];
-		}
-		if ( '' !== $args['event_type'] ) {
-			$where[]  = 'event_type = %s';
-			$params[] = $args['event_type'];
-		}
-		if ( '' !== $args['severity'] ) {
-			$where[]  = 'severity = %s';
-			$params[] = $args['severity'];
-		}
-		if ( '' !== $args['date_from'] ) {
-			$where[]  = 'created_at >= %s';
-			$params[] = $args['date_from'] . ' 00:00:00';
-		}
-		if ( '' !== $args['date_to'] ) {
-			$where[]  = 'created_at <= %s';
-			$params[] = $args['date_to'] . ' 23:59:59';
-		}
-		if ( '' !== $args['search'] ) {
-			$like     = '%' . $wpdb->esc_like( $args['search'] ) . '%';
-			$where[]  = '(message LIKE %s OR user_login LIKE %s OR object_name LIKE %s)';
-			$params[] = $like;
-			$params[] = $like;
-			$params[] = $like;
-		}
-
-		$where_sql = implode( ' AND ', $where );
-
-		// Whitelist orderby / order.
-		$allowed_orderby = array( 'id', 'blog_id', 'user_login', 'event_type', 'severity', 'created_at' );
-		$orderby         = in_array( $args['orderby'], $allowed_orderby, true ) ? $args['orderby'] : 'created_at';
-		$order           = strtoupper( $args['order'] ) === 'ASC' ? 'ASC' : 'DESC';
+		list( $where_sql, $params ) = $this->build_where( $args );
+		list( $orderby, $order )    = $this->build_order( $args );
 
 		$per_page = max( 1, (int) $args['per_page'] );
 		$paged    = max( 1, (int) $args['paged'] );
@@ -242,6 +203,101 @@ class LH_AL_DB {
 			'items' => $items ? $items : array(),
 			'total' => $total,
 		);
+	}
+
+	/**
+	 * Build the WHERE clause and bound parameters from filter args.
+	 *
+	 * @param array $args Filter args.
+	 * @return array{0:string,1:array} [ where_sql, params ]
+	 */
+	private function build_where( array $args ) {
+		global $wpdb;
+
+		$where  = array( '1=1' );
+		$params = array();
+
+		if ( isset( $args['blog_id'] ) && '' !== $args['blog_id'] && null !== $args['blog_id'] ) {
+			$where[]  = 'blog_id = %d';
+			$params[] = (int) $args['blog_id'];
+		}
+		if ( isset( $args['user_id'] ) && '' !== $args['user_id'] ) {
+			$where[]  = 'user_id = %d';
+			$params[] = (int) $args['user_id'];
+		}
+		if ( ! empty( $args['event_type'] ) ) {
+			$where[]  = 'event_type = %s';
+			$params[] = $args['event_type'];
+		}
+		if ( ! empty( $args['severity'] ) ) {
+			$where[]  = 'severity = %s';
+			$params[] = $args['severity'];
+		}
+		if ( ! empty( $args['date_from'] ) ) {
+			$where[]  = 'created_at >= %s';
+			$params[] = $args['date_from'] . ' 00:00:00';
+		}
+		if ( ! empty( $args['date_to'] ) ) {
+			$where[]  = 'created_at <= %s';
+			$params[] = $args['date_to'] . ' 23:59:59';
+		}
+		if ( ! empty( $args['search'] ) ) {
+			$like     = '%' . $wpdb->esc_like( $args['search'] ) . '%';
+			$where[]  = '(message LIKE %s OR user_login LIKE %s OR object_name LIKE %s)';
+			$params[] = $like;
+			$params[] = $like;
+			$params[] = $like;
+		}
+
+		return array( implode( ' AND ', $where ), $params );
+	}
+
+	/**
+	 * Resolve a safe ORDER BY column and direction.
+	 *
+	 * @param array $args Filter args.
+	 * @return array{0:string,1:string} [ orderby, order ]
+	 */
+	private function build_order( array $args ) {
+		$allowed_orderby = array( 'id', 'blog_id', 'user_login', 'event_type', 'severity', 'created_at' );
+		$orderby         = ( isset( $args['orderby'] ) && in_array( $args['orderby'], $allowed_orderby, true ) ) ? $args['orderby'] : 'created_at';
+		$order           = ( isset( $args['order'] ) && strtoupper( $args['order'] ) === 'ASC' ) ? 'ASC' : 'DESC';
+		return array( $orderby, $order );
+	}
+
+	/**
+	 * Stream all rows matching the given filters in batches (for export).
+	 *
+	 * Yields arrays of row objects so large logs do not have to be held in
+	 * memory all at once.
+	 *
+	 * @param array $args       Filter args (blog_id, event_type, severity, search, dates, orderby, order).
+	 * @param int   $batch_size Rows fetched per query.
+	 * @return Generator
+	 */
+	public function stream_for_export( array $args = array(), $batch_size = 1000 ) {
+		global $wpdb;
+
+		$table = self::table_name();
+		list( $where_sql, $params ) = $this->build_where( $args );
+		list( $orderby, $order )    = $this->build_order( $args );
+
+		$batch_size = max( 1, (int) $batch_size );
+		$offset     = 0;
+
+		do {
+			$sql      = "SELECT * FROM {$table} WHERE {$where_sql} ORDER BY {$orderby} {$order} LIMIT %d OFFSET %d";
+			$prepared = $wpdb->prepare( $sql, array_merge( $params, array( $batch_size, $offset ) ) ); // phpcs:ignore
+			$rows     = $wpdb->get_results( $prepared ); // phpcs:ignore
+
+			if ( empty( $rows ) ) {
+				break;
+			}
+
+			yield $rows;
+
+			$offset += $batch_size;
+		} while ( count( $rows ) === $batch_size );
 	}
 
 	/**
